@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .devices-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .device-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .device-info h2 {
+            color: #2c3e50;
+            font-size: 1.3em;
+            margin-bottom: 5px;
+        }
+        
+        .device-info p {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        
+        .light-control {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .btn-on {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-on:hover {
+            background: #229954;
+        }
+        
+        .btn-off {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-off:hover {
+            background: #c0392b;
+        }
+        
+        .btn-report {
+            background: #3498db;
+            color: white;
+            margin-top: 10px;
+            width: 100%;
+        }
+        
+        .btn-report:hover {
+            background: #2980b9;
+        }
+        
+        .chart-container {
+            margin-top: 20px;
+            height: 250px;
+            position: relative;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+            font-size: 0.85em;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
+            color: #7f8c8d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>IoT Device Dashboard</h1>
+        <div id="devices-container" class="devices-grid">
+            <div class="loading">Cargando dispositivos...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3000';
+        let charts = {};
+
+        async function fetchDevices() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/dispositivos`);
+                const result = await response.json();
+                
+                if (result.error) {
+                    document.getElementById('devices-container').innerHTML = 
+                        `<div class="loading">Error: ${result.error}</div>`;
+                    return;
+                }
+                
+                displayDevices(result.data);
+            } catch (error) {
+                document.getElementById('devices-container').innerHTML = 
+                    `<div class="loading">Error al conectar con el servidor</div>`;
+                console.error('Error:', error);
+            }
+        }
+
+        async function fetchLogs(deviceId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logs/${deviceId}/last30`);
+                const result = await response.json();
+                
+                if (result.error || !result.data) {
+                    return null;
+                }
+                
+                return result.data;
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                return null;
+            }
+        }
+
+        async function controlLight(deviceId, state) {
+            const statusDiv = document.getElementById(`status-${deviceId}`);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/control/luz/${deviceId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ luz1: state })
+                });
+                
+                const result = await response.json();
+                
+                if (result.error) {
+                    statusDiv.textContent = `Error: ${result.error}`;
+                    statusDiv.className = 'status error';
+                } else {
+                    statusDiv.textContent = `Luz ${state === 'on' ? 'encendida' : 'apagada'} correctamente`;
+                    statusDiv.className = 'status success';
+                }
+                
+                setTimeout(() => {
+                    statusDiv.textContent = '';
+                    statusDiv.className = 'status';
+                }, 3000);
+            } catch (error) {
+                statusDiv.textContent = 'Error al conectar con el servidor';
+                statusDiv.className = 'status error';
+                console.error('Error:', error);
+            }
+        }
+
+        async function requestReport(deviceId) {
+            const statusDiv = document.getElementById(`status-${deviceId}`);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/control/report/${deviceId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.error) {
+                    statusDiv.textContent = `Error: ${result.error}`;
+                    statusDiv.className = 'status error';
+                } else {
+                    statusDiv.textContent = 'Reporte solicitado correctamente';
+                    statusDiv.className = 'status success';
+                    
+                    setTimeout(() => updateChart(deviceId), 2000);
+                }
+                
+                setTimeout(() => {
+                    statusDiv.textContent = '';
+                    statusDiv.className = 'status';
+                }, 3000);
+            } catch (error) {
+                statusDiv.textContent = 'Error al conectar con el servidor';
+                statusDiv.className = 'status error';
+                console.error('Error:', error);
+            }
+        }
+
+        async function updateChart(deviceId) {
+            const logs = await fetchLogs(deviceId);
+            
+            if (!logs || logs.length === 0) {
+                return;
+            }
+
+            logs.sort((a, b) => a.ts - b.ts);
+
+            const labels = logs.map(log => {
+                const date = new Date(log.ts * 1000);
+                return date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+            });
+
+            const tempData = logs.map(log => log.temperatura);
+            const humData = logs.map(log => log.humedad);
+            const luz1Data = logs.map(log => log.luz1);
+            const luz2Data = logs.map(log => log.luz2);
+
+            const ctx = document.getElementById(`chart-${deviceId}`);
+            
+            if (charts[deviceId]) {
+                charts[deviceId].destroy();
+            }
+
+            charts[deviceId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Temperatura (°C)',
+                            data: tempData,
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Humedad (%)',
+                            data: humData,
+                            borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Luz 1',
+                            data: luz1Data,
+                            borderColor: '#f39c12',
+                            backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Luz 2',
+                            data: luz2Data,
+                            borderColor: '#9b59b6',
+                            backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+
+        async function displayDevices(devices) {
+            const container = document.getElementById('devices-container');
+            container.innerHTML = '';
+
+            for (const device of devices) {
+                const deviceCard = document.createElement('div');
+                deviceCard.className = 'device-card';
+                deviceCard.innerHTML = `
+                    <div class="device-header">
+                        <div class="device-info">
+                            <h2>${device.mac_address}</h2>
+                            <p>${device.ubicacion}</p>
+                        </div>
+                    </div>
+                    <div class="light-control">
+                        <button class="btn btn-on" onclick="controlLight(${device.id}, 'on')">
+                            Encender Luz
+                        </button>
+                        <button class="btn btn-off" onclick="controlLight(${device.id}, 'off')">
+                            Apagar Luz
+                        </button>
+                    </div>
+                    <button class="btn btn-report" onclick="requestReport(${device.id})">
+                        Solicitar Reporte
+                    </button>
+                    <div id="status-${device.id}" class="status"></div>
+                    <div class="chart-container">
+                        <canvas id="chart-${device.id}"></canvas>
+                    </div>
+                `;
+                
+                container.appendChild(deviceCard);
+                
+                await updateChart(device.id);
+            }
+        }
+
+        fetchDevices();
+
+        setInterval(fetchDevices, 30000);
+    </script>
+</body>
+</html>
